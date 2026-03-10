@@ -1,7 +1,7 @@
 # Material_Parts_Life_Prediction 
 - **소재부품 수명 예측 모델 개발**
 
-# 팀명 : 올클 (임시)
+## 팀명 : 올클 (임시)
 **팀원 : 강다영, 이혜원, 최지호**
 
 ## 📌 Project Overview
