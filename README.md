@@ -11,7 +11,6 @@
 ## 🏢 Project Info
 - **기업**: SK 이노베이션  
 - **프로젝트 유형**: 산학 협력 AI/SW 프로젝트  
-- **팀 인원**: 4명  
 
 ## ⚙️ Tech Stack
 - Python
