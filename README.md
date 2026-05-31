@@ -1,6 +1,8 @@
 # Material_Parts_Life_Prediction 
 - **소재부품 수명 예측 및 설계 지원 AI 시스템 개발**
 
+workflow 
+![workflow](workflow.jpg)
 ---
 
 ## 👥 팀명 : 올클 
