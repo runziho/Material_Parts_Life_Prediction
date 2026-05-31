@@ -2,7 +2,7 @@
 - **소재부품 수명 예측 및 설계 지원 AI 시스템 개발**
 
 workflow 
-![workflow](workflow.jpg)
+![workflow](workflow.png)
 ---
 
 ## 👥 팀명 : 올클 
