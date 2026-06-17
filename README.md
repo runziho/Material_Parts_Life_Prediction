@@ -10,7 +10,6 @@
 
 ### 🔹 데이터 업로드 & 예측
 
-![Data_upload](Data_upload.png)
 ![Result](Result.png)
 
 ### 🔹 시뮬레이션
