@@ -22,6 +22,8 @@ import pandas as pd
 import joblib
 import matplotlib.pyplot as plt
 import tf_keras as tfk
+import plotly.express as px
+import plotly.graph_objects as go
 
 # ── 페이지 설정 ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -141,6 +143,80 @@ def predict_ann(X_scaled):
 def predict_ngb(X_scaled):
     dist = ngb_model.pred_dist(X_scaled.astype(np.float64))
     return dist.loc, dist.scale
+
+def predict_ann_batch_df(df_rows):
+    df_rows = df_rows.copy()
+
+    if "Stab_ratio" not in df_rows.columns:
+        df_rows["Stab_ratio"] = (
+            (df_rows["Nb"] / 8 + df_rows["Ti"] / 4) /
+            (df_rows["C"] + df_rows["N"] + 1e-7)
+        )
+
+    X_fixed, _ = align_input_dataframe(df_rows)
+    X_ann_s = ann_scaler_X.transform(X_fixed)
+
+    preds = []
+    for m in ann_models:
+        p = m.predict(X_ann_s, verbose=0)
+        preds.append(ann_scaler_y.inverse_transform(p).flatten())
+
+    preds = np.array(preds)
+    return preds.mean(axis=0), preds.std(axis=0)
+
+
+def build_curve_df(base_row, variable_name, variable_values, stress_min, stress_max, n_points=10, fixed_temp=None):
+    stress_values = np.linspace(stress_min, stress_max, n_points)
+    rows = []
+    meta = []
+
+    for val in variable_values:
+        for stress in stress_values:
+            row = base_row.copy()
+            if fixed_temp is not None:
+                row["temp / oC"] = fixed_temp
+            row[variable_name] = val
+            row["stress / Mpa"] = float(stress)
+
+            rows.append(row)
+            meta.append({
+                "value": val,
+                "stress": float(stress)
+            })
+
+    batch_df = pd.DataFrame(rows)
+    pred_log, pred_std = predict_ann_batch_df(batch_df)
+
+    out = pd.DataFrame(meta)
+    out["life_log"] = pred_log
+    out["life_hours"] = 10 ** pred_log
+    out["model_std"] = pred_std
+    return out
+
+
+def build_point_compare_df(base_row, variable_name, variable_values, fixed_temp, fixed_stress):
+    rows = []
+    labels = []
+
+    for val in variable_values:
+        row = base_row.copy()
+        row["temp / oC"] = fixed_temp
+        row["stress / Mpa"] = float(fixed_stress)
+        row[variable_name] = val
+
+        rows.append(row)
+        labels.append(val)
+
+    batch_df = pd.DataFrame(rows)
+    pred_log, pred_std = predict_ann_batch_df(batch_df)
+
+    out = pd.DataFrame({
+        "value": labels,
+        "life_log": pred_log,
+        "life_hours": 10 ** pred_log,
+        "model_std": pred_std
+    })
+    return out
 
 # ── AI Assistant 응답 ─────────────────────────────────────────────────────────
 def get_answer(text: str) -> str:
@@ -441,96 +517,328 @@ elif page == "Result":
             st.warning("👉 수명이 짧아 조건이 가혹한 상태입니다. (1,000시간 미만)")
 
         st.divider()
-
         # ── 시뮬레이션 ────────────────────────────────────────────
-        st.subheader("🧪 합금 성분 시뮬레이션")
+        sim_tab1, sim_tab2 = st.tabs(["기본 시뮬레이션", "고급 시뮬레이션"])
+        with sim_tab1:
+            st.subheader("🧪 합금 성분 시뮬레이션")
 
-        selected_idx = st.selectbox("샘플 선택", result_df.index)
-        selected_row = result_df.loc[selected_idx].copy()
+            selected_idx = st.selectbox("샘플 선택", result_df.index)
+            selected_row = result_df.loc[selected_idx].copy()
 
-        original_pred  = selected_row["Predicted Life (log10 h)"]
-        original_hours = 10 ** original_pred
+            original_pred  = selected_row["Predicted Life (log10 h)"]
+            original_hours = 10 ** original_pred
 
-        exclude_cols = ["Predicted Life (log10 h)", "ANN Uncertainty",
-                        "Predicted Life (hours)", "NGBoost μ", "NGBoost σ",
-                        "95% CI Lower (h)", "95% CI Upper (h)", "log10(t_r / h)"]
-        available_cols = [c for c in selected_row.index if c not in exclude_cols]
+            exclude_cols = ["Predicted Life (log10 h)", "ANN Uncertainty",
+                            "Predicted Life (hours)", "NGBoost μ", "NGBoost σ",
+                            "95% CI Lower (h)", "95% CI Upper (h)", "log10(t_r / h)"]
+            available_cols = [c for c in selected_row.index if c not in exclude_cols]
 
-        selected_features = st.multiselect(
-            "조절할 성분 선택", available_cols, default=available_cols[:3]
-        )
+            selected_features = st.multiselect(
+                "조절할 성분 선택", available_cols, default=available_cols[:3]
+            )
 
-        modified_row = selected_row.copy()
-        for feature in selected_features:
-            val     = float(selected_row[feature])
-            lo      = float(val * 0.5) if val > 0 else float(val * 1.5) if val < 0 else -1.0
-            hi      = float(val * 1.5) if val > 0 else float(val * 0.5) if val < 0 else 1.0
-            new_val = st.slider(feature, lo, hi, val)
-            modified_row[feature] = new_val
+            modified_row = selected_row.copy()
+            for feature in selected_features:
+                val     = float(selected_row[feature])
+                lo      = float(val * 0.5) if val > 0 else float(val * 1.5) if val < 0 else -1.0
+                hi      = float(val * 1.5) if val > 0 else float(val * 0.5) if val < 0 else 1.0
+                new_val = st.slider(feature, lo, hi, val)
+                modified_row[feature] = new_val
 
-        feature_cols = [c for c in modified_row.index if c not in exclude_cols]
-        X_new = pd.DataFrame([modified_row[feature_cols]])
-        X_new['Stab_ratio'] = (
-            (X_new['Nb'] / 8 + X_new['Ti'] / 4) /
-            (X_new['C'] + X_new['N'] + 1e-7)
-        )
-        X_new_fixed, _ = align_input_dataframe(X_new)
-        X_new_ann = ann_scaler_X.transform(X_new_fixed)
+            feature_cols = [c for c in modified_row.index if c not in exclude_cols]
+            X_new = pd.DataFrame([modified_row[feature_cols]])
+            X_new['Stab_ratio'] = (
+                (X_new['Nb'] / 8 + X_new['Ti'] / 4) /
+                (X_new['C'] + X_new['N'] + 1e-7)
+            )
+            X_new_fixed, _ = align_input_dataframe(X_new)
+            X_new_ann = ann_scaler_X.transform(X_new_fixed)
 
-        new_pred = float(np.mean([
-            ann_scaler_y.inverse_transform(m.predict(X_new_ann, verbose=0)).flatten()[0]
-            for m in ann_models
-        ]))
+            new_pred = float(np.mean([
+                ann_scaler_y.inverse_transform(m.predict(X_new_ann, verbose=0)).flatten()[0]
+                for m in ann_models
+            ]))
 
-        new_hours = 10 ** new_pred
-        X_new_ngb = ngb_scaler_X.transform(X_new_fixed).astype(np.float64)
-        new_dist = ngb_model.pred_dist(X_new_ngb)
-        new_ngb_mu = float(new_dist.loc[0])
-        new_ngb_sig = float(new_dist.scale[0])
+            new_hours = 10 ** new_pred
+            X_new_ngb = ngb_scaler_X.transform(X_new_fixed).astype(np.float64)
+            new_dist = ngb_model.pred_dist(X_new_ngb)
+            new_ngb_mu = float(new_dist.loc[0])
+            new_ngb_sig = float(new_dist.scale[0])
 
-                
-        # 수명 비교
-        st.subheader("📊 수명 비교")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**기존**")
-            st.metric("수명 (log10 h)", round(original_pred, 3))
-            st.metric("수명 (hours)",   f"{original_hours:,.0f}")
-        with col2:
-            diff = new_pred - original_pred
-            st.markdown("**변경 후**")
-            st.metric("수명 (log10 h)", round(new_pred, 3), delta=f"{diff:+.3f}")
-            st.metric("수명 (hours)",   f"{new_hours:,.0f}")
+                    
+            # 수명 비교
+            st.subheader("📊 수명 비교")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**기존**")
+                st.metric("수명 (log10 h)", round(original_pred, 3))
+                st.metric("수명 (hours)",   f"{original_hours:,.0f}")
+            with col2:
+                diff = new_pred - original_pred
+                st.markdown("**변경 후**")
+                st.metric("수명 (log10 h)", round(new_pred, 3), delta=f"{diff:+.3f}")
+                st.metric("수명 (hours)",   f"{new_hours:,.0f}")
 
-        st.caption(
-            f"NGBoost 변경 후: μ={new_ngb_mu:.4f}, σ={new_ngb_sig:.4f}  |  "
-            f"95% CI: {10**(new_ngb_mu-1.96*new_ngb_sig):,.0f} ~ {10**(new_ngb_mu+1.96*new_ngb_sig):,.0f} h"
-        )
+            st.caption(
+                f"NGBoost 변경 후: μ={new_ngb_mu:.4f}, σ={new_ngb_sig:.4f}  |  "
+                f"95% CI: {10**(new_ngb_mu-1.96*new_ngb_sig):,.0f} ~ {10**(new_ngb_mu+1.96*new_ngb_sig):,.0f} h"
+            )
 
-        if selected_features:
-            st.subheader("🧾 성분 변화 비교")
-            st.dataframe(pd.DataFrame({
-                "Original": selected_row[selected_features],
-                "Modified": modified_row[selected_features]
-            }))
+            if selected_features:
+                st.subheader("🧾 성분 변화 비교")
+                st.dataframe(pd.DataFrame({
+                    "Original": selected_row[selected_features],
+                    "Modified": modified_row[selected_features]
+                }))
 
-        # 수명 변화 그래프
-        st.subheader("📈 수명 변화 그래프")
-        fig, ax = plt.subplots(figsize=(6, 4))
-        x = [0, 1]
-        y = [original_pred, new_pred]
-        color = 'steelblue' if new_pred >= original_pred else 'tomato'
-        ax.plot(x, y, marker='o', linewidth=3, color=color)
-        ax.scatter(x, y, s=120, color=color, zorder=5)
-        for i, v in enumerate(y):
-            ax.text(i, v + 0.01, f"{v:.3f}", ha='center', fontsize=11, fontweight='bold')
-        ax.set_xticks([0, 1])
-        ax.set_xticklabels(["Original", "Modified"])
-        ax.set_ylim(min(y) - 0.1, max(y) + 0.1)
-        ax.set_ylabel("Predicted Life (log10 h)")
-        ax.set_title("Life Change (Before → After)")
-        ax.grid(True, linestyle='--', alpha=0.5)
-        st.pyplot(fig)
+            # 수명 변화 그래프
+
+            st.subheader("📈 수명 변화 그래프")
+            fig, ax = plt.subplots(figsize=(6, 4), constrained_layout=True)
+            x = [0, 1]
+            y = [original_pred, new_pred]
+            color = 'steelblue' if new_pred >= original_pred else 'tomato'
+            ax.plot(x, y, marker='o', linewidth=3, color=color)
+            ax.scatter(x, y, s=120, color=color, zorder=5)
+            for i, v in enumerate(y):
+                ax.text(i, v + 0.01, f"{v:.3f}", ha='center', fontsize=11, fontweight='bold')
+            ax.set_xticks([0, 1])
+            ax.set_xticklabels(["Original", "Modified"])
+            ax.set_ylim(min(y) - 0.1, max(y) + 0.1)
+            ax.set_ylabel("Predicted Life (log10 h)")
+            ax.set_title("Life Change (Before → After)")
+            ax.grid(True, linestyle='--', alpha=0.5)
+            col1, col2, col3 = st.columns([1,2,1])
+            with col2:
+                st.pyplot(fig, use_container_width=True)
+        # ============================================================
+        # 고급 시뮬레이션
+        # ============================================================
+        with sim_tab2:
+            st.subheader("📉 고급 시뮬레이션")
+            st.caption("현재 모델은 파손 시간을 예측하는 구조이므로, 실제 시편 변형 애니메이션 대신 조건별 곡선과 파손 예상 시간 비교로 표현함.")
+
+            variable_options = {
+                "Cr": "Cr",
+                "Ni": "Ni",
+                "Nb": "Nb",
+                "Ti": "Ti",
+                "Al": "Al"
+            }
+
+            value_options = {
+                "Cr": [10, 12, 14, 16, 18, 20, 22, 24, 26],
+                "Ni": [4, 8, 12, 16, 20, 24, 28, 32],
+                "Nb": [0.0, 0.2, 0.5, 1.0, 2.0, 3.0, 4.0],
+                "Ti": [0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
+                "Al": [0.0, 0.5, 1.0, 2.0, 3.0]
+            }
+
+            with st.form("advanced_sim_form"):
+                selected_idx_adv = st.selectbox(
+                    "기준 샘플 선택",
+                    result_df.index,
+                    key="adv_selected_idx"
+                )
+                base_row_adv = result_df.loc[selected_idx_adv].copy()
+
+                adv_mode = st.radio(
+                    "분석 방식",
+                    ["온도 영향", "성분 영향", "파손 예상 시간 비교"],
+                    horizontal=True,
+                    key="adv_mode"
+                )
+
+                if adv_mode == "온도 영향":
+                    temp_values = st.multiselect(
+                        "비교할 온도 선택 (°C)",
+                        options=[550, 600, 650, 700, 750, 800, 850, 900, 950, 1000],
+                        default=[600, 700, 800],
+                        key="adv_temp_values"
+                    )
+
+                    stress_min, stress_max = st.slider(
+                        "응력 범위 (MPa)",
+                        min_value=5,
+                        max_value=471,
+                        value=(50, 300),
+                        step=5,
+                        key="adv_temp_stress_range"
+                    )
+
+                    n_points = st.slider(
+                        "곡선 포인트 수",
+                        6, 20, 10, 2,
+                        key="adv_temp_points"
+                    )
+
+                elif adv_mode == "성분 영향":
+                    selected_variable_label = st.selectbox(
+                        "비교할 성분 선택",
+                        list(variable_options.keys()),
+                        key="adv_variable_curve"
+                    )
+                    selected_variable = variable_options[selected_variable_label]
+
+                    fixed_temp = st.slider(
+                        "고정 온도 (°C)",
+                        500, 1100,
+                        int(float(base_row_adv["temp / oC"])),
+                        10,
+                        key="adv_fixed_temp_curve"
+                    )
+
+                    compare_values = st.multiselect(
+                        "비교할 값 선택",
+                        options=value_options[selected_variable],
+                        default=value_options[selected_variable][:3],
+                        key="adv_compare_values_curve"
+                    )
+
+                    stress_min, stress_max = st.slider(
+                        "응력 범위 (MPa)",
+                        min_value=5,
+                        max_value=471,
+                        value=(50, 300),
+                        step=5,
+                        key="adv_curve_stress_range"
+                    )
+
+                    n_points = st.slider(
+                        "곡선 포인트 수",
+                        6, 20, 10, 2,
+                        key="adv_curve_points"
+                    )
+
+                else:
+                    selected_variable_label = st.selectbox(
+                        "비교할 성분 선택",
+                        list(variable_options.keys()),
+                        key="adv_variable_point"
+                    )
+                    selected_variable = variable_options[selected_variable_label]
+
+                    fixed_temp = st.slider(
+                        "운전 온도 (°C)",
+                        500, 1100,
+                        int(float(base_row_adv["temp / oC"])),
+                        10,
+                        key="adv_fixed_temp_point"
+                    )
+
+                    fixed_stress = st.slider(
+                        "운전 응력 (MPa)",
+                        5, 471,
+                        int(float(base_row_adv["stress / Mpa"])),
+                        5,
+                        key="adv_fixed_stress_point"
+                    )
+
+                    compare_values = st.multiselect(
+                        "비교할 값 선택",
+                        options=value_options[selected_variable],
+                        default=value_options[selected_variable][:3],
+                        key="adv_compare_values_point"
+                    )
+
+                run_advanced = st.form_submit_button(
+                    "고급 시뮬레이션 실행",
+                    use_container_width=True,
+                    type="primary"
+                )
+
+            if run_advanced:
+                if adv_mode == "온도 영향":
+                    if not temp_values:
+                        st.warning("온도를 하나 이상 선택해야 함")
+                    else:
+                        curve_df = build_curve_df(
+                            base_row=base_row_adv.to_dict(),
+                            variable_name="temp / oC",
+                            variable_values=temp_values,
+                            stress_min=stress_min,
+                            stress_max=stress_max,
+                            n_points=n_points
+                        )
+
+                        fig_temp = px.line(
+                            curve_df,
+                            x="life_hours",
+                            y="stress",
+                            color="value",
+                            markers=True,
+                            labels={
+                                "life_hours": "Life (hours)",
+                                "stress": "Stress (MPa)",
+                                "value": "Temperature (°C)"
+                            },
+                            title="온도별 Stress–Life Curve"
+                        )
+                        fig_temp.update_xaxes(type="log")
+                        st.plotly_chart(fig_temp, use_container_width=True)
+
+                elif adv_mode == "성분 영향":
+                    if not compare_values:
+                        st.warning("비교할 값을 하나 이상 선택해야 함")
+                    else:
+                        curve_df = build_curve_df(
+                            base_row=base_row_adv.to_dict(),
+                            variable_name=selected_variable,
+                            variable_values=compare_values,
+                            stress_min=stress_min,
+                            stress_max=stress_max,
+                            n_points=n_points,
+                            fixed_temp=fixed_temp
+                        )
+
+                        fig_curve = px.line(
+                            curve_df,
+                            x="life_hours",
+                            y="stress",
+                            color="value",
+                            markers=True,
+                            labels={
+                                "life_hours": "Life (hours)",
+                                "stress": "Stress (MPa)",
+                                "value": selected_variable_label
+                            },
+                            title=f"{selected_variable_label} 변화에 따른 Stress–Life Curve"
+                        )
+                        fig_curve.update_xaxes(type="log")
+                        st.plotly_chart(fig_curve, use_container_width=True)
+
+                else:
+                    if not compare_values:
+                        st.warning("비교할 값을 하나 이상 선택해야 함")
+                    else:
+                        point_df = build_point_compare_df(
+                            base_row=base_row_adv.to_dict(),
+                            variable_name=selected_variable,
+                            variable_values=compare_values,
+                            fixed_temp=fixed_temp,
+                            fixed_stress=fixed_stress
+                        )
+
+                        point_df["label"] = point_df["value"].apply(lambda x: f"{selected_variable_label}={x}")
+
+                        fig_point = px.bar(
+                            point_df,
+                            x="label",
+                            y="life_hours",
+                            text="life_hours",
+                            labels={
+                                "label": "Scenario",
+                                "life_hours": "Predicted Rupture Time (hours)"
+                            },
+                            title="파손 예상 시간 비교"
+                        )
+                        fig_point.update_yaxes(type="log")
+                        fig_point.update_traces(
+                            texttemplate="%{text:.2e}",
+                            textposition="outside"
+                        )
+                        st.plotly_chart(fig_point, use_container_width=True)
+        
 
 # ════════════════════════════════════════════════════════════════════
 # 단일 샘플 예측
