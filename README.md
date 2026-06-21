@@ -93,7 +93,8 @@
 ### 2. 모델 학습
 
 ```bash
-python train.py
+python train_ANN.py
+python train_NGBoost.py
 ```
 
 학습 완료 후 모델 및 스케일러 파일 생성됨
@@ -101,7 +102,7 @@ python train.py
 ### 3. 웹 서비스 실행
 
 ```bash
-streamlit run app.py
+streamlit run app_ver4.py
 ```
 
 웹 UI를 통해 데이터 업로드, 예측, 결과 확인, 시뮬레이션 기능 사용 가능
