@@ -90,9 +90,10 @@
 
 `Data/creep_austenite.xlsx` 파일 저장
 
-### 2. 모델 학습
+### 2. 필요 패키지 설치 및 모델 학습
 
 ```bash
+py -3.11 -m pip install numpy pandas openpyxl scikit-learn joblib tensorflow tf_keras tensorflow-probability ngboost matplotlib plotly streamlit
 python train_ANN.py
 python train_NGBoost.py
 ```
