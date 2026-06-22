@@ -49,7 +49,7 @@
 
 ## ⚙️ Tech Stack
 
-* Python
+* Python (Version 3.11, TensorFlow 호환 버전)
 * TensorFlow / Keras (ANN 앙상블 모델)
 * NGBoost (불확실성 분석)
 * Pandas / NumPy / Scikit-learn
@@ -92,7 +92,7 @@
 ### 2. 필요 패키지 설치 및 모델 학습
 
 ```bash
-py -3.11 -m pip install numpy pandas openpyxl scikit-learn joblib tensorflow tf_keras tensorflow-probability ngboost matplotlib plotly streamlit
+pip install numpy pandas openpyxl scikit-learn joblib tensorflow tf_keras tensorflow-probability ngboost matplotlib plotly streamlit
 python train_ANN.py
 python train_NGBoost.py
 ```
