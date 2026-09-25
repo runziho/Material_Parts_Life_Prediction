@@ -92,7 +92,7 @@
 ### 2. 필요 패키지 설치 및 모델 학습
 
 ```bash
-pip install numpy pandas openpyxl scikit-learn joblib tensorflow tf_keras tensorflow-probability ngboost matplotlib plotly streamlit
+pip install numpy pandas openpyxl scikit-learn joblib tensorflow tf_keras tensorflow-probability ngboost matplotlib plotly streamlit gradio openai python-dotenv
 python train_ANN.py
 python train_NGBoost.py
 ```
@@ -102,7 +102,7 @@ python train_NGBoost.py
 ### 3. 웹 서비스 실행
 
 ```bash
-streamlit run app_ver4.py
+python app_gradio_ver1.py
 ```
 
 웹 UI를 통해 데이터 업로드, 예측, 결과 확인, 시뮬레이션 기능 사용 가능
@@ -114,6 +114,7 @@ streamlit run app_ver4.py
 * ANN 앙상블 기반 수명 예측 성능 확보
 * NGBoost 적용을 통한 불확실성 정량화
 * 다양한 입력 데이터 조건에서도 안정적 동작 확인
+* LLM을 활용한 챗봇 기능 제공
 
 ---
 
