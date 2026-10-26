@@ -1,6 +1,6 @@
 import os
 
-#  tf_keras / tensorflow import 보다 먼저 설정해야 적용
+# tf_keras / tensorflow import 보다 먼저 설정해야 적용
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 
 import joblib
@@ -24,33 +24,28 @@ except ImportError:
 load_dotenv()
 openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# ── 0. 파일명 설정 (본인 저장 파일명에 맞게 여기만 수정하세요) ─────────────────
-# v2 파일(bnn_v2_*)이 폴더에 있으면 v2를, 없으면 기존 v1(bnn_*)을 자동으로 사용합니다.
+# ── 0. 파일명 설정 ─────────────────────────────────────────────────
 _V2 = os.path.exists("bnn_v2_model.keras")
 _P = "bnn_v2_" if _V2 else "bnn_"
 BNN_MODEL_PATH     = f"{_P}model.keras"
 BNN_SCALER_X_PATH  = f"{_P}scaler_X.pkl"
-BNN_SCALER_Y_PATH  = f"{_P}scaler_y.pkl"   # 타깃을 스케일링하지 않았다면 파일이 없어도 동작
+BNN_SCALER_Y_PATH  = f"{_P}scaler_y.pkl"
 BNN_FEATURES_PATH  = f"{_P}features.pkl"
-LOGVAR_MIN, LOGVAR_MAX = -6.0, 4.0         # v2 학습 때와 동일한 값 (분산 폭주 방지)
+LOGVAR_MIN, LOGVAR_MAX = -6.0, 4.0
 print("📦 사용 모델:", "BNN v2 (평균+노이즈)" if _V2 else "BNN v1 (MC Dropout)")
-DEFAULT_N_SAMPLES = 100                  # 몬테카를로 샘플링 횟수
+DEFAULT_N_SAMPLES = 100
 
-# ── 1. 모델 및 스케일러 로드 ──────────────────────────────────────────────────
+# ── 1. 모델 및 스케일러 로드 ──────────────────────────────────────────
 import keras as keras3
 
 @keras3.saving.register_keras_serializable(package="Custom", name="MCDropout")
 class MCDropout(keras3.layers.Dropout):
-    """추론 시에도 항상 드롭아웃을 켜는 레이어 (Monte Carlo Dropout).
-    학습 코드의 MCDropout과 같은 이름이어야 모델이 로드됩니다."""
+    """추론 시에도 항상 드롭아웃을 켜는 레이어 (Monte Carlo Dropout)."""
     def call(self, inputs, training=None):
         return super().call(inputs, training=True)
 
 def load_model_any():
-    """Keras 3로 저장된 .keras 파일은 Keras 3로, 레거시는 tf_keras로 순서대로 시도."""
     errors = []
-
-    # 1) Keras 3 (batch_shape 설정이 들어간 최신 저장 포맷)
     try:
         model = keras3.models.load_model(
             BNN_MODEL_PATH, compile=False,
@@ -61,7 +56,6 @@ def load_model_any():
     except Exception as e:
         errors.append(f"[Keras 3] {type(e).__name__}: {e}")
 
-    # 2) 레거시 tf_keras (TFP 레이어를 tf_keras로 저장한 경우)
     try:
         model = tfk.models.load_model(BNN_MODEL_PATH, compile=False)
         print("✅ tf_keras 로 BNN 로드 성공")
@@ -85,16 +79,14 @@ def print_scaler_debug():
     if hasattr(bnn_scaler_X, "mean_"):
         print("scaler_X mean_[:5] =", np.round(bnn_scaler_X.mean_[:5], 3))
     if bnn_scaler_y is None:
-        print("scaler_y: 없음 (타깃 역변환 없이 모델 출력을 그대로 사용)")
+        print("scaler_y: 없음")
     else:
         print("scaler_y:", type(bnn_scaler_y).__name__,
               "| mean_ =", getattr(bnn_scaler_y, "mean_", "?"),
               "| scale_ =", getattr(bnn_scaler_y, "scale_", "?"))
     print("──────────────────────────")
 
-
-
-# ── 2. 컬럼 및 메타데이터 정의 ────────────────────────────────────────────────
+# ── 2. 컬럼 및 메타데이터 정의 ───────────────────────────────────────
 ALLOY_COLS = ['Cr','Ni','Mo','Mn','Si','Nb','Ti','V','W','Cu','N','C','B','P','S','Co','Al','Sn']
 COND_COLS  = ['S_temp / oC', 'log10(S_time / s)', 'WQ', 'temp / oC', 'stress / Mpa']
 ALL_COLS   = ALLOY_COLS + COND_COLS + ['Stab_ratio']
@@ -115,44 +107,39 @@ META = {
     'stress / Mpa': (5.0, 471.0, 130.0, 1.0, "응력 (MPa)")
 }
 
-# BNN은 입력 23개(합금 18 + 공정 5)로 학습됨 → Stab_ratio는 모델 입력에서 제외
-BNN_COLS = ALLOY_COLS + COND_COLS
-
-def scale_X(df):
-    """DataFrame에서 BNN 입력 23개 컬럼만 순서대로 골라 스케일링."""
-    return bnn_scaler_X.transform(df[BNN_COLS].values)
-
-# 학습 때 저장한 feature 순서가 있으면 그 순서를 그대로 사용 (없으면 기본 순서)
+# 학습된 피처 순서(Stab_ratio 포함 24개)를 파일에서 안전하게 로드
 if os.path.exists(BNN_FEATURES_PATH):
-    _feats = [str(c).strip() for c in joblib.load(BNN_FEATURES_PATH)]
-    if sorted(_feats) == sorted(BNN_COLS):
-        BNN_COLS = _feats
-        print("✅ 학습 때 feature 순서 적용:", BNN_COLS)
-    else:
-        print("⚠️ bnn_features.pkl 컬럼이 앱 컬럼과 달라 기본 순서를 사용합니다.")
-        print("   학습에만 있는 컬럼:", sorted(set(_feats) - set(BNN_COLS)))
-        print("   앱에만 있는 컬럼  :", sorted(set(BNN_COLS) - set(_feats)))
+    BNN_COLS = [str(c).strip() for c in joblib.load(BNN_FEATURES_PATH)]
+    print("✅ 학습 때 feature 순서 적용:", BNN_COLS)
 else:
-    print("ℹ️ bnn_features.pkl 없음 → 기본 순서 사용:", BNN_COLS)
+    BNN_COLS = ALLOY_COLS + COND_COLS + ['Stab_ratio']
+    print("ℹ️ bnn_features.pkl 없음 → 기본 24개 순서 사용")
 
 print_scaler_debug()
 
 def stab_ratio(nb, ti, c, n):
-    return (nb / 8 + ti / 4) / (c + n + 1e-7)
+    return (nb / 8.0 + ti / 4.0) / (c + n + 1e-7)
 
 def align_input_dataframe(df):
     df = df.copy()
     df.columns = df.columns.astype(str).str.strip()
+    
+    # Stab_ratio가 없으면 자동 계산해서 채워줌
+    if "Stab_ratio" not in df.columns:
+        nb = pd.to_numeric(df.get('Nb', 0), errors="coerce").fillna(0)
+        ti = pd.to_numeric(df.get('Ti', 0), errors="coerce").fillna(0)
+        c = pd.to_numeric(df.get('C', 0), errors="coerce").fillna(0)
+        n = pd.to_numeric(df.get('N', 0), errors="coerce").fillna(0)
+        df['Stab_ratio'] = stab_ratio(nb, ti, c, n)
+
     aligned = pd.DataFrame(index=df.index)
     missing_cols = []
-    for target in ALL_COLS:
+    for target in BNN_COLS:
         found = None
-        # 1) 정확히 일치 (대소문자 무시) 우선
         for c in df.columns:
             if c.lower() == target.lower():
                 found = c
                 break
-        # 2) 없으면 부분 일치 (원소기호처럼 짧은 이름은 오매칭 위험이 커서 제외)
         if found is None and len(target) > 3:
             for c in df.columns:
                 if target.lower() in c.lower() or c.lower() in target.lower():
@@ -165,27 +152,19 @@ def align_input_dataframe(df):
             missing_cols.append(target)
     return aligned, missing_cols
 
-# ── 3. BNN 예측 및 분석 함수 ──────────────────────────────────────────────────
+def scale_X(df):
+    return bnn_scaler_X.transform(df[BNN_COLS].values)
+
+# ── 3. BNN 예측 및 분석 함수 ────────────────────────────────────────
 def aggregate_mc(mus, vars_, rng=None):
-    """
-    MC 샘플링 결과를 합침.
-    mus  : (T, n) 각 샘플링의 예측 평균 (원래 단위)
-    vars_: (T, n) 각 샘플링의 예측 분산 (v1은 0)
-    return: 평균, 총 Std, 모델 불확실성 Std, 데이터 노이즈 Std, 예측 샘플
-    """
     rng = rng or np.random.default_rng()
     mean = mus.mean(axis=0)
-    epi_var = mus.var(axis=0)            # 모델 불확실성 (epistemic)
-    ale_var = vars_.mean(axis=0)         # 데이터 노이즈 (aleatoric, v1은 0)
+    epi_var = mus.var(axis=0)
+    ale_var = vars_.mean(axis=0)
     samples = mus + np.sqrt(vars_) * rng.standard_normal(mus.shape)
     return mean, np.sqrt(epi_var + ale_var), np.sqrt(epi_var), np.sqrt(ale_var), samples
 
 def predict_bnn_full(X_scaled, n_samples=DEFAULT_N_SAMPLES):
-    """
-    같은 입력으로 n_samples번 순전파 (MC Dropout).
-    - v1(출력 1개): 평균 = 예측 수명(log10 h), Std = 모델 불확실성
-    - v2(출력 2개): [평균, 로그분산] → 모델 불확실성 + 데이터 노이즈를 합친 총 Std
-    """
     x = np.asarray(X_scaled, dtype=np.float32)
     y_scale = float(bnn_scaler_y.scale_[0]) if bnn_scaler_y is not None else 1.0
     mus, vars_ = [], []
@@ -211,8 +190,6 @@ def predict_bnn(X_scaled, n_samples=DEFAULT_N_SAMPLES):
 
 def predict_bnn_batch_df(df_rows, n_samples=30):
     df_rows = df_rows.copy()
-    if "Stab_ratio" not in df_rows.columns:
-        df_rows["Stab_ratio"] = stab_ratio(df_rows["Nb"], df_rows["Ti"], df_rows["C"], df_rows["N"])
     X_fixed, _ = align_input_dataframe(df_rows)
     X_s = scale_X(X_fixed)
     mean, std, _ = predict_bnn(X_s, n_samples)
@@ -223,35 +200,18 @@ def sim_predict(stress, temp, cr, ni=12.0, mo=0.1, s_temp=1150, n_samples=30):
         'Cr': cr, 'Ni': ni, 'Mo': mo, 'Mn': 1.5, 'Si': 0.5, 'Nb': 0.0, 'Ti': 0.03, 'V': 0.0,
         'W': 0.0, 'Cu': 0.1, 'N': 0.05, 'C': 0.06, 'B': 0.0, 'P': 0.03, 'S': 0.008, 'Co': 0.0,
         'Al': 0.005, 'Sn': 0.0, 'S_temp / oC': s_temp, 'log10(S_time / s)': 2.78, 'WQ': 1,
-        'temp / oC': temp, 'stress / Mpa': float(stress), 'Stab_ratio': stab_ratio(0.0, 0.03, 0.06, 0.05)
+        'temp / oC': temp, 'stress / Mpa': float(stress), 
+        'Stab_ratio': stab_ratio(0.0, 0.03, 0.06, 0.05)
     }
-    X = pd.DataFrame([{c: row[c] for c in ALL_COLS}])
+    X = pd.DataFrame([{c: row.get(c, 0.0) for c in BNN_COLS}])
     X_s = scale_X(X)
     mean, std, _ = predict_bnn(X_s, n_samples)
     return float(mean[0]), float(std[0])
 
-# ── 4. LLM 챗봇 로직 ─────────────────────────────────────────────────────────
+# ── 4. LLM 챗봇 로직 ────────────────────────────────────────────────
 LLM_SYSTEM_PROMPT = """
 당신은 '소재부품 크리프(Creep) 수명 예측 시스템'의 AI 도메인 전문가 챗봇입니다.
 사용자의 질문에 대해 친절하고 전문적으로 한국어로 답변해 주세요.
-
-[시스템 및 도메인 지식]
-1. 시스템 개요:
-   - 합금 성분(Cr, Ni, Mo, Nb, Ti 등)과 공정 조건(온도, 응력)을 입력받아 크리프 수명을 예측하고 불확실성을 분석하는 플랫폼입니다.
-   - 엑셀 업로드 시 컬럼 순서 및 누락 항목을 자동 정렬 및 기본값(0) 보정하여 처리합니다.
-2. 수명 예측 모델:
-   - 베이지안 신경망(BNN, Monte Carlo Dropout 방식): 구조는 입력 23개 → Dense(64) → MCDropout(0.1) → Dense(32) → MCDropout(0.1) → 출력 1개.
-     추론 시에도 드롭아웃을 켠 채 같은 입력을 여러 번(예: 100회) 예측하면 예측값 분포가 생기며,
-     평균을 예측 수명(log10 시간), 표준편차(Std)를 불확실성(모델 불확실성, epistemic)으로 사용합니다.
-     MC Dropout은 베이지안 추론의 근사 방법입니다.\n   - BNN v2는 출력이 2개(예측 평균, 로그분산)로, 모델 불확실성(epistemic)과 데이터 노이즈(aleatoric)를 분리해 추정합니다.\n     총 불확실성 = sqrt(모델 불확실성² + 데이터 노이즈²).
-   - 95% 구간은 샘플링된 예측 분포의 2.5~97.5 백분위수로 계산합니다.
-   - (참고) 이전 버전: Committee ANN(R²=0.9236, RMSE=0.2570), NGBoost(R²=0.9155, RMSE=0.2694, 95% Coverage=88.1%).
-   - BNN 성능 수치(R², RMSE, Coverage)는 여기에 본인 결과로 채워 넣으세요.
-3. 재료공학 지식:
-   - 크리프(Creep): 고온·고응력 환경에서 재료가 시간에 따라 서서히 변형되는 현상.
-   - 주요 변수: 응력(Stress / MPa)과 온도(Temp / °C)가 핵심 영향 변수.
-   - 주요 성분: Cr(내산화성), Ni(고온 안정성), Nb/Ti(석출 강화).
-   - 파생변수: Stab_ratio = (Nb/8 + Ti/4) / (C + N + ε).
 """
 
 def predict_chat_llm(user_message, history):
@@ -275,7 +235,7 @@ def predict_chat_llm(user_message, history):
     history.append({"role": "assistant", "content": bot_response})
     return "", history
 
-# ── 5. Gradio 이벤트 처리 함수들 ──────────────────────────────────────────────
+# ── 5. Gradio 이벤트 처리 함수들 ──────────────────────────────────────
 def _find_actual_col(df):
     for c in df.columns:
         if "t_r" in str(c).lower():
@@ -289,7 +249,6 @@ def run_batch_prediction(file, n_samples):
         path = file if isinstance(file, str) else file.name
         df = pd.read_excel(path)
         X_fixed, missing_cols = align_input_dataframe(df)
-        X_fixed['Stab_ratio'] = stab_ratio(X_fixed['Nb'], X_fixed['Ti'], X_fixed['C'], X_fixed['N'])
 
         X_s = scale_X(X_fixed)
         mean, std, samples = predict_bnn(X_s, n_samples)
@@ -299,59 +258,65 @@ def run_batch_prediction(file, n_samples):
         def to_hours(v):
             return 10.0 ** np.clip(v, -20, 300)
 
-        res = df.copy()
-        res["BNN Predicted Life (log10 h)"] = mean
-        res["BNN Predicted Life (hours)"] = to_hours(mean)
-        res["BNN Uncertainty (Std, log10)"] = std
-        res["95% CI Lower (h)"] = to_hours(lo)
-        res["95% CI Upper (h)"] = to_hours(hi)
-
-        # 실제값(log10(t_r / h)) 열이 있으면 비교
         actual_col = _find_actual_col(df)
         actual = None
-        metrics_md = ""
         if actual_col is not None:
             actual = pd.to_numeric(df[actual_col], errors="coerce").values.astype(float)
-            ok = ~np.isnan(actual)
-            if ok.sum() > 1:
-                err = mean[ok] - actual[ok]
-                rmse = float(np.sqrt(np.mean(err ** 2)))
-                ss_tot = float(np.sum((actual[ok] - actual[ok].mean()) ** 2))
-                r2 = 1 - float(np.sum(err ** 2)) / ss_tot if ss_tot > 0 else float("nan")
-                cover = float(np.mean((actual[ok] >= lo[ok]) & (actual[ok] <= hi[ok]))) * 100
-                metrics_md = (f"\n\n**실제값 비교** (`{actual_col}`, {int(ok.sum())}개): "
-                              f"R² = `{r2:.4f}`, RMSE = `{rmse:.4f}`, 95% 구간 Coverage = `{cover:.1f}%`")
 
-        avg_life = float(np.mean(mean))
+        # ⭐️ [수정 핵심] 예측 수명(mean) 기준 오름차순 정렬 인덱스 생성
+        sort_idx = np.argsort(mean)
+        mean_s = mean[sort_idx]
+        std_s = std[sort_idx]
+        lo_s = lo[sort_idx]
+        hi_s = hi[sort_idx]
+        actual_s = actual[sort_idx] if actual is not None else None
+
+        # 결과 데이터프레임도 정렬된 순서로 재구성
+        res = df.iloc[sort_idx].copy().reset_index(drop=True)
+        res["BNN Predicted Life (log10 h)"] = mean_s
+        res["BNN Predicted Life (hours)"] = to_hours(mean_s)
+        res["BNN Uncertainty (Std, log10)"] = std_s
+        res["95% CI Lower (h)"] = to_hours(lo_s)
+        res["95% CI Upper (h)"] = to_hours(hi_s)
+
+        metrics_md = ""
+        if actual is not None:
+            ok = ~np.isnan(actual_s)
+            if ok.sum() > 1:
+                err = mean_s[ok] - actual_s[ok]
+                rmse = float(np.sqrt(np.mean(err ** 2)))
+                ss_tot = float(np.sum((actual_s[ok] - actual_s[ok].mean()) ** 2))
+                r2 = 1 - float(np.sum(err ** 2)) / ss_tot if ss_tot > 0 else float("nan")
+                cover = float(np.mean((actual_s[ok] >= lo_s[ok]) & (actual_s[ok] <= hi_s[ok]))) * 100
+                metrics_md = (f"\n\n**실제값 비교** (`{actual_col}`, {int(ok.sum())}개): "
+                            f"R² = `{r2:.4f}`, RMSE = `{rmse:.4f}`, 95% 구간 Coverage = `{cover:.1f}%`")
+
+        avg_life = float(np.mean(mean_s))
         warn = ""
-        if np.nanmax(np.abs(mean)) > 20:
-            warn = ("\n\n⚠️ **예측값이 비정상적으로 큽니다** (log10 수명은 보통 0~6). "
-                    "엑셀 컬럼 매칭, 입력 순서, `bnn_scaler_y.pkl`(타깃 역변환) 설정을 확인하세요.")
         if avg_life > 4:
             comment = "👉 **해석**: 전반적으로 수명이 매우 긴 고내열 합금 조건입니다. (10,000시간 이상)"
         elif avg_life > 3:
             comment = "👉 **해석**: 일반적인 고온 환경에서 사용 가능한 수준입니다. (1,000~10,000시간)"
         else:
             comment = "👉 **해석**: 수명이 짧아 조건이 가혹한 상태입니다. (1,000시간 미만)"
-        comment += f"\n\n평균 불확실성(Std): `{std.mean():.4f}` (log10 h)" + metrics_md + warn
+        comment += f"\n\n평균 불확실성(Std): `{std_s.mean():.4f}` (log10 h)" + metrics_md + warn
 
-        # ── 그래프 1: 샘플별 예측값 + 95% 구간 (+ 실제값) ──
-        idx = np.arange(1, len(mean) + 1)
+        idx = np.arange(1, len(mean_s) + 1)
         fig1 = go.Figure()
         fig1.add_trace(go.Scatter(
-            x=idx, y=mean, mode="markers", name="BNN 예측 (평균)",
+            x=idx, y=mean_s, mode="markers", name="BNN 예측 (평균)",
             marker=dict(size=8, color="#4f46e5"),
-            error_y=dict(type="data", symmetric=False, array=hi - mean, arrayminus=mean - lo,
+            error_y=dict(type="data", symmetric=False, array=hi_s - mean_s, arrayminus=mean_s - lo_s,
                          color="rgba(79,70,229,0.45)", thickness=1.5, width=3),
         ))
-        if actual is not None:
-            fig1.add_trace(go.Scatter(x=idx, y=actual, mode="markers", name="실제값",
+        if actual_s is not None:
+            fig1.add_trace(go.Scatter(x=idx, y=actual_s, mode="markers", name="실제값",
                                       marker=dict(size=8, color="tomato", symbol="diamond")))
-        fig1.update_layout(title="샘플별 BNN 예측 수명과 95% 구간",
-                           xaxis_title="Sample #", yaxis_title="log10 Life (h)",
+        fig1.update_layout(title="샘플별 BNN 예측 수명 오름차순 정렬 및 95% 구간",
+                           xaxis_title="Sorted Sample Index", yaxis_title="log10 Life (h)",
                            template="plotly_white", legend=dict(orientation="h", y=-0.2))
 
-        # ── 그래프 2: 실제값 vs 예측값 (없으면 불확실성 분포) ──
+        # 오른쪽 그래프는 기존 원본 데이터 기준 산점도 유지 (회귀 평가용)
         if actual is not None and np.sum(~np.isnan(actual)) > 1:
             ok = ~np.isnan(actual)
             lim_lo = float(min(actual[ok].min(), mean[ok].min()))
@@ -360,10 +325,10 @@ def run_batch_prediction(file, n_samples):
             fig2.add_trace(go.Scatter(x=[lim_lo, lim_hi], y=[lim_lo, lim_hi], mode="lines",
                                       name="y = x (완벽한 예측)", line=dict(color="gray", dash="dash")))
             fig2.add_trace(go.Scatter(
-                x=actual[ok], y=mean[ok], mode="markers", name="BNN 예측",
+                x=actual, y=mean, mode="markers", name="BNN 예측",
                 marker=dict(size=8, color="#4f46e5"),
-                error_y=dict(type="data", symmetric=False, array=(hi - mean)[ok], arrayminus=(mean - lo)[ok],
-                             color="rgba(79,70,229,0.35)", thickness=1.2, width=2),
+                error_y=dict(type="data", symmetric=False, array=(hi - mean), arrayminus=(mean - lo),
+                           color="rgba(79,70,229,0.35)", thickness=1.2, width=2),
             ))
             fig2.update_layout(title="실제값 vs BNN 예측값 (오차막대: 95% 구간)",
                                xaxis_title="Actual log10 Life (h)", yaxis_title="Predicted log10 Life (h)",
@@ -373,7 +338,7 @@ def run_batch_prediction(file, n_samples):
                                 title="BNN 불확실성(Std) 분포")
             fig2.update_layout(template="plotly_white")
 
-        status = f"✅ 예측 완료 (MC 샘플 {int(n_samples)}회, 자동 보정 컬럼: {missing_cols if missing_cols else '없음'})"
+        status = f"✅ 예측 완료 (MC 샘플 {int(n_samples)}회, 예측 수명 오름차순 정렬 완료)"
         return res.round(4), status, comment, fig1, fig2
     except Exception as e:
         return None, f"❌ 오류 발생: {str(e)}", "", None, None
@@ -381,9 +346,9 @@ def run_batch_prediction(file, n_samples):
 def run_single_prediction(*args):
     n_samples = int(args[-1])
     vals = args[:-1]
-    inp = {col: vals[i] for i, col in enumerate(ALL_COLS[:-1])}
-    inp['Stab_ratio'] = stab_ratio(inp['Nb'], inp['Ti'], inp['C'], inp['N'])
-    X = pd.DataFrame([{c: inp[c] for c in ALL_COLS}])
+    inp = {col: vals[i] for i, col in enumerate(ALLOY_COLS + COND_COLS)}
+    inp['Stab_ratio'] = stab_ratio(inp.get('Nb', 0), inp.get('Ti', 0), inp.get('C', 0), inp.get('N', 0))
+    X = pd.DataFrame([{c: inp.get(c, 0.0) for c in BNN_COLS}])
 
     X_s = scale_X(X)
     r = predict_bnn_full(X_s, n_samples)
@@ -400,10 +365,10 @@ def run_single_prediction(*args):
 
     res_md = f"""
 ### 🧠 BNN 예측 결과
-* **예측 수명**: **{life_h:,.0f} 시간** (log10: `{mu:.4f}`)
-* **불확실성 (Std)**: `{sd:.4f}` (log10 h) → 예측 수명 **{mu:.3f} ± {sd:.3f}**{split_txt}
-* **95% 예측 구간**: **{lower_h:,.0f} ~ {upper_h:,.0f} 시간**
-* MC 샘플링 횟수: {n_samples}회
+- **예측 수명**: **{life_h:,.0f} 시간** (log10: `{mu:.4f}`)
+- **불확실성 (Std)**: `{sd:.4f}` (log10 h) → 예측 수명 **{mu:.3f} ± {sd:.3f}**{split_txt}
+- **95% 예측 구간**: **{lower_h:,.0f} ~ {upper_h:,.0f} 시간**
+- MC 샘플링 횟수: {n_samples}회
 """
 
     fig, ax = plt.subplots(figsize=(8, 3.2))
@@ -419,7 +384,8 @@ def run_single_prediction(*args):
     return res_md, fig
 
 def run_advanced_simulation(mode, temp_vals, var_choice, compare_vals, fixed_temp, fixed_stress, stress_min, stress_max, n_pts):
-    base_row = {c: META[c][2] if c in META else 0.0 for c in ALL_COLS}
+    base_row = {c: META[c][2] if c in META else 0.0 for c in ALLOY_COLS + COND_COLS}
+    base_row['Stab_ratio'] = stab_ratio(base_row.get('Nb', 0), base_row.get('Ti', 0), base_row.get('C', 0), base_row.get('N', 0))
 
     if mode == "온도 영향":
         if not temp_vals: return go.Figure()
@@ -456,7 +422,6 @@ def run_advanced_simulation(mode, temp_vals, var_choice, compare_vals, fixed_tem
                       title=f"{var_choice} 변화에 따른 Stress–Life Curve (BNN 평균 예측)")
         fig.update_xaxes(type="log")
         return fig
-
     else:
         if not compare_vals: return go.Figure()
         rows, labels = [], []
@@ -465,7 +430,6 @@ def run_advanced_simulation(mode, temp_vals, var_choice, compare_vals, fixed_tem
             rows.append(r); labels.append(f"{var_choice}={v}")
         pred_log, pred_std = predict_bnn_batch_df(pd.DataFrame(rows))
         df_res = pd.DataFrame({"label": labels, "life_hours": 10 ** pred_log})
-        # 불확실성(Std)을 log 공간에서 오차막대로 표시
         upper = 10 ** (pred_log + pred_std) - 10 ** pred_log
         lower = 10 ** pred_log - 10 ** (pred_log - pred_std)
 
@@ -550,8 +514,7 @@ def update_rupture_html(cr, stress, speed):
     escaped_html = html_code.replace('"', '&quot;')
     return f'<iframe srcdoc="{escaped_html}" style="width:100%; height:450px; border:none;"></iframe>'
 
-
-# ── 6. Gradio 전체 화면 구성 ──────────────────────────────────────────────────
+# ── 6. Gradio 전체 화면 구성 ──────────────────────────────────────────
 with gr.Blocks(title="소재부품 크립 수명 예측 시스템 (BNN)", theme=gr.themes.Soft()) as demo:
     gr.Markdown("# ⚙️ 소재부품 크리프 수명 예측 및 불확실성 분석 플랫폼 (BNN)")
 
