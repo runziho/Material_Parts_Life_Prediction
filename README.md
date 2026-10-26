@@ -13,8 +13,7 @@
 ![Result](Result.png)
 
 ### 🔹 시뮬레이션
-
-*GIF추가하기
+성분 조절 바 / 입력 데이터를 반영한 합금 파단 시뮬레이션을 확인할 수 있음
 
 ### 💡 Quick Preview
 데이터 넣으면 수명 바로 예측됨
@@ -22,8 +21,7 @@
 데이터 형식 안 맞아도 자동으로 처리됨
 
 ### 🧠 핵심 포인트
-단순 예측 모델 ❌
-직접 값 바꿔보면서 확인 가능한 구조 ⭕
+직접 값 바꿔보면서 확인 가능한 구조
 
 
 ## 👥 Team 올클
@@ -50,11 +48,9 @@
 ## ⚙️ Tech Stack
 
 * Python (Version 3.11, TensorFlow 호환 버전)
-* TensorFlow / Keras (ANN 앙상블 모델)
-* NGBoost (불확실성 분석)
+* TensorFlow / Keras (BNN 모델)
 * Pandas / NumPy / Scikit-learn
 * Matplotlib
-* Streamlit
 
 ---
 
@@ -64,7 +60,7 @@
   → 합금 성분 및 조건 기반 크립 수명 예측 수행
 
 * **불확실성 분석**
-  → NGBoost 활용, 예측값과 함께 신뢰구간 산출
+  → BNN 활용 -> 예측값과 함께 신뢰구간 산출
 
 * **데이터 자동 처리**
   → 컬럼 순서 정렬 및 누락값 보정 기능 구현
@@ -93,8 +89,7 @@
 
 ```bash
 pip install numpy pandas openpyxl scikit-learn joblib tensorflow tf_keras tensorflow-probability ngboost matplotlib plotly streamlit gradio openai python-dotenv
-python train_ANN.py
-python train_NGBoost.py
+python train_BNN_v2.py
 ```
 
 학습 완료 후 모델 및 스케일러 파일 생성됨
@@ -102,17 +97,17 @@ python train_NGBoost.py
 ### 3. 웹 서비스 실행
 
 ```bash
-python app_gradio_ver1.py
+python app_gradio_bnn.py
 ```
 
-웹 UI를 통해 데이터 업로드, 예측, 결과 확인, 시뮬레이션 기능 사용 가능
+웹을 통해 데이터 업로드, 예측, 결과 확인, 시뮬레이션 기능 사용 가능
 
 ---
 
 ## 📊 Result
 
-* ANN 앙상블 기반 수명 예측 성능 확보
-* NGBoost 적용을 통한 불확실성 정량화
+* BNN 기반 수명 예측 성능 확보
+* 불확실성 정량화
 * 다양한 입력 데이터 조건에서도 안정적 동작 확인
 * LLM을 활용한 챗봇 기능 제공
 
