@@ -1,6 +1,6 @@
 import os
 
-# tf_keras / tensorflow import 보다 먼저 설정해야 적용
+# tf_keras / tensorflow import 보다 먼저 설정해야 적용 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 
 import joblib
