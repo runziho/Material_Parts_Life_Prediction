@@ -34,7 +34,7 @@ BNN_SCALER_X_PATH  = f"{_P}scaler_X.pkl"
 BNN_SCALER_Y_PATH  = f"{_P}scaler_y.pkl"
 BNN_FEATURES_PATH  = f"{_P}features.pkl"
 LOGVAR_MIN, LOGVAR_MAX = -6.0, 4.0
-print("📦 사용 모델:", "BNN v2 (평균+노이즈)" if _V2 else "BNN v1 (MC Dropout)")
+print("📦 사용 모델:", "BNN v3 (평균+노이즈)" if _V2 else "BNN v1 (MC Dropout)")
 DEFAULT_N_SAMPLES = 100
 
 # ── 1. 모델 및 스케일러 로드 ──────────────────────────────────────────
