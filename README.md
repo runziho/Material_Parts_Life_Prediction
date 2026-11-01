@@ -83,7 +83,7 @@
 
 ### 1. 데이터 준비
 
-`Data/creep_austenite.xlsx` 파일 저장
+`Data/creep_austenite.xlsx`, `health_data.xlsx` 파일 저장
 
 ### 2. 필요 패키지 설치 및 모델 학습
 
