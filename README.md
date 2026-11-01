@@ -6,11 +6,11 @@
 ## 📸 Demo
 ### 🔹 메인 화면
 
-![Home](Home.png)
+<img width="1885" height="507" alt="Home" src="https://github.com/user-attachments/assets/92bbb373-d477-4074-8d2b-d3379c335611" />
 
 ### 🔹 데이터 업로드 & 예측
 
-![Result](Result.png)
+<img width="1918" height="1176" alt="dashboard" src="https://github.com/user-attachments/assets/deeb5d04-c760-405c-a3bf-acc370cf16e3" />
 
 ### 🔹 시뮬레이션
 성분 조절 바 / 입력 데이터를 반영한 합금 파단 시뮬레이션을 확인할 수 있음
@@ -99,7 +99,7 @@ python train_Traffic_ BNN.py
 ### 3. 웹 서비스 실행
 
 ```bash
-python app_gradio_main.py
+python app_gradio_main_v2.py
 ```
 
 웹을 통해 데이터 업로드, 예측, 결과 확인, 시뮬레이션 기능 사용 가능
