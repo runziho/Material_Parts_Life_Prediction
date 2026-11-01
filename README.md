@@ -90,6 +90,7 @@
 ```bash
 pip install numpy pandas openpyxl scikit-learn joblib tensorflow tf_keras tensorflow-probability ngboost matplotlib plotly streamlit gradio openai python-dotenv
 python train_BNN_v2.py
+python train_Health_ BNN.py
 ```
 
 학습 완료 후 모델 및 스케일러 파일 생성됨
@@ -97,7 +98,7 @@ python train_BNN_v2.py
 ### 3. 웹 서비스 실행
 
 ```bash
-python app_gradio_bnn.py
+python app_gradio_main.py
 ```
 
 웹을 통해 데이터 업로드, 예측, 결과 확인, 시뮬레이션 기능 사용 가능
