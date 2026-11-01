@@ -83,7 +83,7 @@
 
 ### 1. 데이터 준비
 
-`Data/creep_austenite.xlsx`, `health_data.xlsx` 파일 저장
+`Data/creep_austenite.xlsx`, `health_data.xlsx`, `Data_Traffic` 파일 저장
 
 ### 2. 필요 패키지 설치 및 모델 학습
 
@@ -91,6 +91,7 @@
 pip install numpy pandas openpyxl scikit-learn joblib tensorflow tf_keras tensorflow-probability ngboost matplotlib plotly streamlit gradio openai python-dotenv
 python train_BNN_v2.py
 python train_Health_ BNN.py
+python train_Traffic_ BNN.py
 ```
 
 학습 완료 후 모델 및 스케일러 파일 생성됨
